@@ -2,6 +2,8 @@ import { execFile } from "child_process";
 import { promises as fs } from "fs";
 import path from "path";
 import { promisify } from "util";
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import type { ComputerFile, ComputerState } from "./types";
 
 const execFileAsync = promisify(execFile);
@@ -134,6 +136,49 @@ export async function execInWorkspace(command: string): Promise<{ stdout: string
   }
 }
 
+function isPublicIp(address: string): boolean {
+  const version = isIP(address);
+  if (version === 4) {
+    const octets = address.split(".").map(Number);
+    const [a, b, c] = octets;
+    if (octets.length !== 4 || octets.some((n) => n < 0 || n > 255)) return false;
+    return !(
+      a === 0 || a === 10 || a === 127 || a >= 224 ||
+      (a === 100 && b >= 64 && b <= 127) ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && (b === 168 || (b === 0 && c === 0) || (b === 0 && c === 2))) ||
+      (a === 198 && (b === 18 || b === 19 || (b === 51 && c === 100))) ||
+      (a === 203 && b === 0 && c === 113)
+    );
+  }
+  if (version === 6) {
+    const ip = address.toLowerCase();
+    if (ip === "::" || ip === "::1" || ip.startsWith("fc") || ip.startsWith("fd") ||
+        ip.startsWith("fe8") || ip.startsWith("fe9") || ip.startsWith("fea") ||
+        ip.startsWith("feb") || ip.startsWith("ff")) return false;
+    const mapped = ip.match(/::ffff:(\\d+\\.\\d+\\.\\d+\\.\\d+)$/);
+    return mapped ? isPublicIp(mapped[1]) : true;
+  }
+  return false;
+}
+
+async function assertPublicHttpUrl(url: URL): Promise<void> {
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("Only http(s) URLs are allowed");
+  }
+  const host = url.hostname.replace(/^\\[|\\]$/g, "").toLowerCase();
+  if (!host || host === "localhost" || host.endsWith(".localhost") ||
+      host.endsWith(".local") || host.endsWith(".internal")) {
+    throw new Error("Private network addresses are not allowed");
+  }
+  const version = isIP(host);
+  const addresses = version ? [{ address: host }] : await lookup(host, { all: true, verbatim: true });
+  if (!addresses.length || addresses.some((entry) => !isPublicIp(entry.address))) {
+    throw new Error("Private or non-public network addresses are not allowed");
+  }
+}
+
 export async function browseUrl(url: string): Promise<{ title: string; text: string; url: string }> {
   let parsed: URL;
   try {
@@ -141,24 +186,56 @@ export async function browseUrl(url: string): Promise<{ title: string; text: str
   } catch {
     throw new Error("Invalid URL");
   }
-  if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("Only http(s) URLs are allowed");
-  const res = await fetch(parsed.toString(), {
-    redirect: "follow",
-    headers: { "User-Agent": "open-teammate-bots/0.1 (+shared-computer)" },
-  });
-  const html = await res.text();
-  const title = (html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || parsed.hostname)
-    .replace(/\s+/g, " ")
+
+  let res: Response | undefined;
+  for (let redirects = 0; redirects <= 5; redirects++) {
+    await assertPublicHttpUrl(parsed);
+    res = await fetch(parsed.toString(), {
+      redirect: "manual",
+      signal: AbortSignal.timeout(12_000),
+      headers: { "User-Agent": "open-teammate-bots/0.1 (+shared-computer)" },
+    });
+    if (![301, 302, 303, 307, 308].includes(res.status)) break;
+    const location = res.headers.get("location");
+    if (!location || redirects === 5) throw new Error("Too many or invalid redirects");
+    parsed = new URL(location, parsed);
+  }
+
+  if (!res || !res.ok) throw new Error(`Page request failed: ${res?.status || "unknown"}`);
+  const contentType = res.headers.get("content-type") || "";
+  if (!/text\\/(html|plain)|application\\/(json|xml|xhtml\\+xml)/i.test(contentType)) {
+    throw new Error("Only HTML, text, JSON, and XML pages can be opened");
+  }
+
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error("The page returned an empty response");
+  const decoder = new TextDecoder();
+  let html = "";
+  let bytes = 0;
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    bytes += value.byteLength;
+    if (bytes > 1_000_000) {
+      await reader.cancel();
+      throw new Error("Page is too large (1 MB maximum)");
+    }
+    html += decoder.decode(value, { stream: true });
+  }
+  html += decoder.decode();
+
+  const title = (html.match(/<title[^>]*>([\\s\\S]*?)<\\/title>/i)?.[1] || parsed.hostname)
+    .replace(/\\s+/g, " ")
     .trim()
     .slice(0, 160);
   const text = html
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\\s\\S]*?<\\/script>/gi, " ")
+    .replace(/<style[\\s\\S]*?<\\/style>/gi, " ")
     .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
+    .replace(/\\s+/g, " ")
     .trim()
     .slice(0, 8_000);
-  return { title, text, url: res.url || parsed.toString() };
+  return { title, text, url: parsed.toString() };
 }
 
 export function defaultComputerState(): ComputerState {
