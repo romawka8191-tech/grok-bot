@@ -157,7 +157,7 @@ function isPublicIp(address: string): boolean {
     if (ip === "::" || ip === "::1" || ip.startsWith("fc") || ip.startsWith("fd") ||
         ip.startsWith("fe8") || ip.startsWith("fe9") || ip.startsWith("fea") ||
         ip.startsWith("feb") || ip.startsWith("ff")) return false;
-    const mapped = ip.match(/::ffff:(\\d+\\.\\d+\\.\\d+\\.\\d+)$/);
+    const mapped = ip.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/);
     return mapped ? isPublicIp(mapped[1]) : true;
   }
   return false;
@@ -167,7 +167,7 @@ async function assertPublicHttpUrl(url: URL): Promise<void> {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error("Only http(s) URLs are allowed");
   }
-  const host = url.hostname.replace(/^\\[|\\]$/g, "").toLowerCase();
+  const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
   if (!host || host === "localhost" || host.endsWith(".localhost") ||
       host.endsWith(".local") || host.endsWith(".internal")) {
     throw new Error("Private network addresses are not allowed");
@@ -203,7 +203,7 @@ export async function browseUrl(url: string): Promise<{ title: string; text: str
 
   if (!res || !res.ok) throw new Error(`Page request failed: ${res?.status || "unknown"}`);
   const contentType = res.headers.get("content-type") || "";
-  if (!/text\\/(html|plain)|application\\/(json|xml|xhtml\\+xml)/i.test(contentType)) {
+  if (!/text\/(html|plain)|application\/(json|xml|xhtml\+xml)/i.test(contentType)) {
     throw new Error("Only HTML, text, JSON, and XML pages can be opened");
   }
 
@@ -224,15 +224,15 @@ export async function browseUrl(url: string): Promise<{ title: string; text: str
   }
   html += decoder.decode();
 
-  const title = (html.match(/<title[^>]*>([\\s\\S]*?)<\\/title>/i)?.[1] || parsed.hostname)
-    .replace(/\\s+/g, " ")
+  const title = (html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || parsed.hostname)
+    .replace(/\s+/g, " ")
     .trim()
     .slice(0, 160);
   const text = html
-    .replace(/<script[\\s\\S]*?<\\/script>/gi, " ")
-    .replace(/<style[\\s\\S]*?<\\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
     .replace(/<[^>]+>/g, " ")
-    .replace(/\\s+/g, " ")
+    .replace(/\s+/g, " ")
     .trim()
     .slice(0, 8_000);
   return { title, text, url: parsed.toString() };
