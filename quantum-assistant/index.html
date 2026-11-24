@@ -40,7 +40,7 @@ function drawSignals(){
  const ix=(m.outcomes||[]).findIndex(x=>String(x).toLowerCase()==='yes'),p=Number((m.outcomePrices||[])[ix>=0?ix:0]);
  const price=Number.isFinite(p)?(p*100).toFixed(1)+'¢':'—';
  const why=s.reasons.length?s.reasons.join(' · '):'Есть базовая активность; требуется дополнительная проверка';
- return '<article class="signal"><div class="signalhead"><div class="main"><a class="signalname" href="https://polymarket.com/event/'+encodeURIComponent(m.slug||'')+'" target="_blank" rel="noreferrer">'+escapeHtml(m.question||'Без названия')+' ↗</a><div class="signalmeta"><span>Цена '+price+'</span><span>Объём '+money(m.volume24hr)+'</span><span>Ликвидность '+money(m.liquidityNum)+'</span></div></div><div class="score">'+s.score}/100</div></div><div class="signalwhy">'+escapeHtml(why)+(s.change!==null&&Number.isFinite(s.change)?' · изменение '+(s.change>0?'+':'')+(s.change*100).toFixed(1)+'%':'')+'</div></article>'
+ return '<article class="signal"><div class="signalhead"><div class="main"><a class="signalname" href="https://polymarket.com/event/'+encodeURIComponent(m.slug||'')+'" target="_blank" rel="noreferrer">'+escapeHtml(m.question||'Без названия')+' ↗</a><div class="signalmeta"><span>Цена '+price+'</span><span>Объём '+money(m.volume24hr)+'</span><span>Ликвидность '+money(m.liquidityNum)+'</span></div></div><div class="score">'+s.score+'/100</div></div><div class="signalwhy">'+escapeHtml(why)+(s.change!==null&&Number.isFinite(s.change)?' · изменение '+(s.change>0?'+':'')+(s.change*100).toFixed(1)+'%':'')+'</div></article>'
  }).join(''):'<div class="empty">Пока нет рынков, прошедших базовые фильтры объёма и ликвидности.</div>';
 }
 function showTab(tab){
