@@ -1,0 +1,43 @@
+name: Grok AI PR Review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+jobs:
+  review:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Install Grok CLI
+        run: curl -fsSL https://x.ai/cli/install.sh | bash
+      - name: Review PR diff
+        env:
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test -n "${XAI_API_KEY:-}" || { echo 'Missing XAI_API_KEY repository secret' >&2; exit 1; }
+          git diff --no-ext-diff --unified=5 "$BASE_SHA" "$HEAD_SHA" > /tmp/pr.diff
+          {
+            echo 'Review this pull request diff for concrete bugs, security issues, regressions, and missing tests.'
+            echo 'Do not modify files or run commands. Report actionable findings with severity, file, line, impact, and fix. If none, say so and note test risks.'
+            echo '--- DIFF ---'
+            cat /tmp/pr.diff
+          } > /tmp/prompt.txt
+          grok -p "$(cat /tmp/prompt.txt)" --output-format plain > review.md
+          test -s review.md
+      - name: Publish review comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: gh pr comment "$PR_NUMBER" --repo "$GH_REPOSITORY" --body-file review.md
